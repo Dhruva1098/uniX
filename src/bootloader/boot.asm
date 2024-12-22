@@ -80,6 +80,7 @@ main:
     mov si, hello
     call puts
 
+    cli 
     hlt
 
 
@@ -168,11 +169,11 @@ disk_reset:
 
 .done: 
     popa
-    push di
-    push dx
-    push cx
-    push bx
-    push ax ;restore modified registers
+    pop di
+    pop dx
+    pop cx
+    pop bx
+    pop ax ;restore modified registers
 
 
 
