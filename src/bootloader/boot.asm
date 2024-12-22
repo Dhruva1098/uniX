@@ -37,7 +37,7 @@ main:
     mov ds, ax
     mov es, ax  ;setting up data segments, also cannto write in es,ds directly 
     
-    ;setip stack
+    ;setup stack
     mov ss, ax
     mov sp, 0x7C00 ;stack starts at 0x7C00
     
