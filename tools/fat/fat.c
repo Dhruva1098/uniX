@@ -34,10 +34,28 @@ typedef struct {
 } __attribute__((packed)) BootSector;  // packed attribute is used to prevent the compiler from padding the structure
 
 BootSector g_BootSector;
+uint8_t* g_Fat = NULL;
 
 bool readBoolSector(FILE* disk) {
     return fread(&g_BootSector, sizeof(BootSector), 1, disk);
 }
+
+bool readSectors(FILE* disk, uint32_t lba, uint32_t count, void* bufferOut) {
+    bool ok = true;
+    ok = ok && (fseek(disk, lba * g_BootSector.BytesPerSector, SEEK_SET) == 0);
+    ok = ok &&  (fread(bufferOut, g_BootSector.BytesPerSector, count, disk) == count);
+    return ok;
+}
+
+bool readFat(FILE* disk) {
+    g_Fat = (uint8_t*)malloc(g_BootSector.SectorsPerFat * g_BootSector.BytesPerSector);
+    if(!g_Fat) {
+        return false;
+    }
+
+    return readSectors(disk, g_BootSector.ReservedSectors, g_BootSector.SectorsPerFat, g_Fat);
+}
+
 int main(int argc, char** argv){
     
     if(argc < 3) {
@@ -51,5 +69,19 @@ int main(int argc, char** argv){
         return -1;
     }
 
+    if(!readBoolSector(disk)){
+        fprintf(stderr, "Error: Unable to read boot sector\n");
+        fclose(disk);
+        return -2;
+    }
+
+    if(!readFat(disk)){
+        fprintf(stderr, "Error: Unable to read FAT\n");
+        free(g_Fat);
+        fclose(disk);
+        return -3;
+    }
+
+    free(g_Fat);
     return 0;
 }
