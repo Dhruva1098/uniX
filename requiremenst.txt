@@ -1,6 +1,8 @@
-I am using qemy, you can use anyting
+I am using qemu, you can use anyting
 
 also install homebrew if not already done
 these dependencieds remove the errors associated to them
 "brew install dosfstools" -removes error of mkfs.fat not found
 "brew install mcopy" -removes error of mcopy command not found
+
+We use FAT12 file system
