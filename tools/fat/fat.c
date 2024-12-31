@@ -34,8 +34,26 @@ typedef struct {
     uint8_t SystemId[8];
 } __attribute__((packed)) BootSector;  // packed attribute is used to prevent the compiler from padding the structure
 
+typedef struct
+{
+    uint8_t Name[11];
+    uint8_t Attributes;
+    uint8_t Reserved;
+    uint8_t CreationTimeTenths;
+    uint16_t CreationTime;
+    uint16_t CreationDate;
+    uint16_t LastAccessDate;
+    uint16_t FirstClusterHigh;
+    uint16_t LastWriteTime;
+    uint16_t LastWriteDate;
+    uint16_t FirstClusterLow;
+    uint32_t FileSize;
+} __attribute__((packed)) DirectoryEntry;
+
 BootSector g_BootSector;
 uint8_t* g_Fat = NULL;
+DirectoryEntry* g_RootDirectory = NULL;
+
 
 bool readBoolSector(FILE* disk) {
     return fread(&g_BootSector, sizeof(BootSector), 1, disk);
