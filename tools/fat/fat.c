@@ -75,6 +75,16 @@ bool readFat(FILE* disk) {
     return readSectors(disk, g_BootSector.ReservedSectors, g_BootSector.SectorsPerFat, g_Fat);
 }
 
+bool readRootDirectory(FILE* disk) {
+    uint32_t lba = g_BootSector.ReservedSectors + (g_BootSector.FatCount * g_BootSector.SectorsPerFat);
+    uint32_t size = sizeof(DirectoryEntry) * g_BootSector.DirectoryEntryCount;
+    uint32_t count = size / g_BootSector.BytesPerSector;
+    if(size % g_BootSector.BytesPerSector ) {
+        count++;
+    }
+    g_RootDirectory = (DirectoryEntry*)malloc(count * g_BootSector.BytesPerSector); //  Not size because read sectors take sectors
+    return readSectors(disk, lba, count, g_RootDirectory);
+}
 int main(int argc, char** argv){
     
     if(argc < 3) {
@@ -99,6 +109,12 @@ int main(int argc, char** argv){
         free(g_Fat);
         fclose(disk);
         return -3;
+    }
+    if(!readRootDirectory(disk)){
+        fprintf(stderr, "Error: Unable to read root directory\n");
+        free(g_Fat);
+        fclose(disk);
+        return -4;
     }
 
     free(g_Fat);
