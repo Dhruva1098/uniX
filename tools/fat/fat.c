@@ -1,13 +1,12 @@
 #include <stdio.h>
-#include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
+#include <stdint.h>
+#include <string.h> 
 
 // No bool types in C
 typedef uint8_t bool;
 #define true 1
 #define false 0
-
 
 // Boot sector structure
 typedef struct {
@@ -55,25 +54,42 @@ BootSector g_BootSector;
 uint8_t* g_Fat = NULL;
 DirectoryEntry* g_RootDirectory = NULL;
 
-
 bool readBoolSector(FILE* disk) {
     return fread(&g_BootSector, sizeof(BootSector), 1, disk);
 }
 
 bool readSectors(FILE* disk, uint32_t lba, uint32_t count, void* bufferOut) {
     bool ok = true;
-    ok = ok && (fseek(disk, lba * g_BootSector.BytesPerSector, SEEK_SET) == 0);
-    ok = ok &&  (fread(bufferOut, g_BootSector.BytesPerSector, count, disk) == count);
+    printf("Seeking to LBA: %u\n", lba);
+    if (fseek(disk, lba * g_BootSector.BytesPerSector, SEEK_SET) != 0) {
+        printf("fseek failed\n");
+        ok = false;
+    }
+    printf("Reading %u sectors\n", count);
+    size_t sectorsRead = fread(bufferOut, g_BootSector.BytesPerSector, count, disk);
+    if (sectorsRead != count) {
+        printf("fread failed, read %zu sectors instead of %u\n", sectorsRead, count);
+        printf("Error: %s\n", strerror(ferror(disk)));
+        ok = false;
+    }
     return ok;
 }
 
 bool readFat(FILE* disk) {
+    printf("BootSector.BytesPerSector: %u\n", g_BootSector.BytesPerSector);
+    printf("BootSector.SectorsPerFat: %u\n", g_BootSector.SectorsPerFat);
+    printf("BootSector.ReservedSectors: %u\n", g_BootSector.ReservedSectors);
+
     g_Fat = (uint8_t*)malloc(g_BootSector.SectorsPerFat * g_BootSector.BytesPerSector);
     if(!g_Fat) {
+        printf("Failed to allocate memory for FAT\n");
         return false;
     }
-
-    return readSectors(disk, g_BootSector.ReservedSectors, g_BootSector.SectorsPerFat, g_Fat);
+    bool result = readSectors(disk, g_BootSector.ReservedSectors, g_BootSector.SectorsPerFat, g_Fat);
+    if (!result) {
+        printf("Failed to read FAT sectors\n");
+    }
+    return result;
 }
 
 bool readRootDirectory(FILE* disk) {
@@ -121,6 +137,7 @@ int main(int argc, char** argv){
         fclose(disk);
         return -3;
     }
+
     if(!readRootDirectory(disk)){
         fprintf(stderr, "Error: Unable to read root directory\n");
         free(g_Fat);
