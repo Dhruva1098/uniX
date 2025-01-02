@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 // No bool types in C
 typedef uint8_t bool;
@@ -85,6 +86,16 @@ bool readRootDirectory(FILE* disk) {
     g_RootDirectory = (DirectoryEntry*)malloc(count * g_BootSector.BytesPerSector); //  Not size because read sectors take sectors
     return readSectors(disk, lba, count, g_RootDirectory);
 }
+
+DirectoryEntry* findFile(const char* filename) {
+    for (int i = 0; i < g_BootSector.DirectoryEntryCount; i++) {
+        if (memcmp(g_RootDirectory[i].Name, filename, 11) == 0) {
+            return &g_RootDirectory[i];
+        }
+    }
+    return NULL;
+}
+
 int main(int argc, char** argv){
     
     if(argc < 3) {
@@ -117,7 +128,15 @@ int main(int argc, char** argv){
         return -4;
     }
 
+    DirectoryEntry* entry = findFile(argv[2]);
+    if(!entry){
+        fprintf(stderr, "Error: File not found\n");
+        free(g_Fat);
+        free(g_RootDirectory);
+        fclose(disk);
+        return -5;
+    }
+
     free(g_Fat);
-    free(g_RootDirectory);
     return 0;
 }
