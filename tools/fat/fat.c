@@ -118,5 +118,6 @@ int main(int argc, char** argv){
     }
 
     free(g_Fat);
+    free(g_RootDirectory);
     return 0;
 }
