@@ -1,159 +1,207 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <stdint.h>
-#include <string.h> 
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 
-// No bool types in C
 typedef uint8_t bool;
 #define true 1
 #define false 0
 
-// Boot sector structure
-typedef struct {
-    uint8_t BootJumpInstruction[3];
-    uint8_t OEMIdentifier[8];
-    uint16_t BytesPerSector;
-    uint8_t SectorsPerCluster;
-    uint16_t ReservedSectors;
-    uint8_t FatCount;
-    uint16_t DirectoryEntryCount;
-    uint16_t TotalSectors;
-    uint16_t MediaDescriptorType;
-    uint16_t SectorsPerFat;
-    uint16_t SectorsPerTrack;
-    uint16_t HeadCount;
-    uint32_t HiddenSectors;
-    uint32_t TotalSectorsBig;
-
-    //extended boot record
-    uint8_t DriveNumber;
-    uint8_t Reserved;
-    uint8_t BootSignature;
-    uint32_t VolumeID;
-    uint8_t VolumeLabel[11];
-    uint8_t SystemId[8];
-} __attribute__((packed)) BootSector;  // packed attribute is used to prevent the compiler from padding the structure
-
-typedef struct
+typedef struct 
 {
-    uint8_t Name[11];
-    uint8_t Attributes;
-    uint8_t Reserved;
-    uint8_t CreationTimeTenths;
-    uint16_t CreationTime;
-    uint16_t CreationDate;
-    uint16_t LastAccessDate;
-    uint16_t FirstClusterHigh;
-    uint16_t LastWriteTime;
-    uint16_t LastWriteDate;
-    uint16_t FirstClusterLow;
-    uint32_t FileSize;
+    uint8_t boot_jump_instruction[3];
+    uint8_t oem_identifier[8];
+    uint16_t bytes_per_sector;
+    uint8_t sectors_per_cluster;
+    uint16_t reserved_sectors;
+    uint8_t fat_count;
+    uint16_t dir_entry_count;
+    uint16_t total_sectors;
+    uint8_t media_descriptor_type;
+    uint16_t sectors_per_fat;
+    uint16_t sectors_per_track;
+    uint16_t heads;
+    uint32_t hidden_sectors;
+    uint32_t large_sector_count;
+
+    // extended boot record
+    uint8_t drive_number;
+    uint8_t reserved;
+    uint8_t signature;
+    uint32_t volume_id;          // serial number, value doesn't matter
+    uint8_t volume_label[11];    // 11 bytes, padded with spaces
+    uint8_t system_id[8];
+
+    // ... we don't care about code ...
+
+} __attribute__((packed)) BootSector;
+
+typedef struct 
+{
+    uint8_t name[11];
+    uint8_t attributes;
+    uint8_t reserved;
+    uint8_t created_time_tenths;
+    uint16_t created_time;
+    uint16_t created_date;
+    uint16_t accessed_date;
+    uint16_t first_cluster_high;
+    uint16_t modified_time;
+    uint16_t modified_date;
+    uint16_t first_cluster_low;
+    uint32_t size;
 } __attribute__((packed)) DirectoryEntry;
 
-BootSector g_BootSector;
-uint8_t* g_Fat = NULL;
-DirectoryEntry* g_RootDirectory = NULL;
 
-bool readBoolSector(FILE* disk) {
-    return fread(&g_BootSector, sizeof(BootSector), 1, disk);
+BootSector g_boot_sector;
+uint8_t* g_fat = NULL;
+DirectoryEntry* g_root_directory = NULL;
+uint32_t g_root_directory_end;
+
+
+bool ReadBootSector(FILE* disk)
+{
+    return fread(&g_boot_sector, sizeof(g_boot_sector), 1, disk) > 0;
 }
 
-bool readSectors(FILE* disk, uint32_t lba, uint32_t count, void* bufferOut) {
+bool ReadSectors(FILE* disk, uint32_t lba, uint32_t count, void* buffer_out)
+{
     bool ok = true;
-    printf("Seeking to LBA: %u\n", lba);
-    if (fseek(disk, lba * g_BootSector.BytesPerSector, SEEK_SET) != 0) {
-        printf("fseek failed\n");
-        ok = false;
-    }
-    printf("Reading %u sectors\n", count);
-    size_t sectorsRead = fread(bufferOut, g_BootSector.BytesPerSector, count, disk);
-    if (sectorsRead != count) {
-        printf("fread failed, read %zu sectors instead of %u\n", sectorsRead, count);
-        printf("Error: %s\n", strerror(ferror(disk)));
-        ok = false;
-    }
+    ok = ok && (fseek(disk, lba * g_boot_sector.bytes_per_sector, SEEK_SET) == 0);
+    ok = ok && (fread(buffer_out, g_boot_sector.bytes_per_sector, count, disk) == count);
     return ok;
 }
 
-bool readFat(FILE* disk) {
-    printf("BootSector.BytesPerSector: %u\n", g_BootSector.BytesPerSector);
-    printf("BootSector.SectorsPerFat: %u\n", g_BootSector.SectorsPerFat);
-    printf("BootSector.ReservedSectors: %u\n", g_BootSector.ReservedSectors);
-
-    g_Fat = (uint8_t*)malloc(g_BootSector.SectorsPerFat * g_BootSector.BytesPerSector);
-    if(!g_Fat) {
-        printf("Failed to allocate memory for FAT\n");
+bool ReadFat(FILE* disk)
+{
+    g_fat = (uint8_t*) malloc(g_boot_sector.sectors_per_fat * g_boot_sector.bytes_per_sector);
+    if (!g_fat) {
+        fprintf(stderr, "Failed to allocate memory for FAT\n");
         return false;
     }
-    bool result = readSectors(disk, g_BootSector.ReservedSectors, g_BootSector.SectorsPerFat, g_Fat);
-    if (!result) {
-        printf("Failed to read FAT sectors\n");
-    }
-    return result;
+    return ReadSectors(disk, g_boot_sector.reserved_sectors, g_boot_sector.sectors_per_fat, g_fat);
 }
 
-bool readRootDirectory(FILE* disk) {
-    uint32_t lba = g_BootSector.ReservedSectors + (g_BootSector.FatCount * g_BootSector.SectorsPerFat);
-    uint32_t size = sizeof(DirectoryEntry) * g_BootSector.DirectoryEntryCount;
-    uint32_t count = size / g_BootSector.BytesPerSector;
-    if(size % g_BootSector.BytesPerSector ) {
-        count++;
+bool ReadRootDirectory(FILE* disk)
+{
+    uint32_t lba = g_boot_sector.reserved_sectors + g_boot_sector.sectors_per_fat * g_boot_sector.fat_count;
+    uint32_t size = sizeof(DirectoryEntry) * g_boot_sector.dir_entry_count;
+    uint32_t sectors = (size / g_boot_sector.bytes_per_sector);
+    if (size % g_boot_sector.bytes_per_sector > 0)
+        sectors++;
+
+    g_root_directory_end = lba + sectors;
+    g_root_directory = (DirectoryEntry*) malloc(sectors * g_boot_sector.bytes_per_sector);
+    if (!g_root_directory) {
+        fprintf(stderr, "Failed to allocate memory for root directory\n");
+        return false;
     }
-    g_RootDirectory = (DirectoryEntry*)malloc(count * g_BootSector.BytesPerSector); //  Not size because read sectors take sectors
-    return readSectors(disk, lba, count, g_RootDirectory);
+    return ReadSectors(disk, lba, sectors, g_root_directory);
 }
 
-DirectoryEntry* findFile(const char* filename) {
-    for (int i = 0; i < g_BootSector.DirectoryEntryCount; i++) {
-        if (memcmp(g_RootDirectory[i].Name, filename, 11) == 0) {
-            return &g_RootDirectory[i];
-        }
+DirectoryEntry* FindFile(const char* name)
+{
+    for (uint32_t i = 0; i < g_boot_sector.dir_entry_count; i++)
+    {
+        if (memcmp(name, g_root_directory[i].name, 11) == 0)
+            return &g_root_directory[i];
     }
+
     return NULL;
 }
 
-int main(int argc, char** argv){
-    
-    if(argc < 3) {
-        printf("Invalid syntax. Syntax: %s <disk image> <file name> \n", argv[0]);
-        return 1;
-    }
+bool ReadFile(DirectoryEntry* file_entry, FILE* disk, uint8_t* output_buffer)
+{
+    bool ok = true;
+    uint16_t current_cluster = file_entry->first_cluster_low;
 
-    FILE* disk = fopen(argv[1], "rb");
-    if(!disk){
-        fprintf(stderr, "Error: Unable to open disk image %s\n", argv[1]);
+    do {
+        uint32_t lba = g_root_directory_end + (current_cluster - 2) * g_boot_sector.sectors_per_cluster;
+        ok = ok && ReadSectors(disk, lba, g_boot_sector.sectors_per_cluster, output_buffer);
+        output_buffer += g_boot_sector.sectors_per_cluster * g_boot_sector.bytes_per_sector;
+
+        uint32_t fat_index = current_cluster * 3 / 2;
+        if (current_cluster % 2 == 0)
+            current_cluster = (*(uint16_t*)(g_fat + fat_index)) & 0x0FFF;
+        else
+            current_cluster = (*(uint16_t*)(g_fat + fat_index)) >> 4;
+
+    } while (ok && current_cluster < 0x0FF8);
+
+    return ok;
+}
+
+int main(int argc, char** argv)
+{
+    if (argc < 3) {
+        fprintf(stderr, "Syntax: %s <disk image> <file name>\n", argv[0]);
         return -1;
     }
 
-    if(!readBoolSector(disk)){
-        fprintf(stderr, "Error: Unable to read boot sector\n");
+    FILE* disk = fopen(argv[1], "rb");
+    if (!disk) {
+        fprintf(stderr, "Cannot open disk image %s!\n", argv[1]);
+        return -1;
+    }
+
+    if (!ReadBootSector(disk)) {
+        fprintf(stderr, "Could not read boot sector!\n");
         fclose(disk);
         return -2;
     }
 
-    if(!readFat(disk)){
-        fprintf(stderr, "Error: Unable to read FAT\n");
-        free(g_Fat);
+    if (!ReadFat(disk)) {
+        fprintf(stderr, "Could not read FAT!\n");
+        free(g_fat);
         fclose(disk);
         return -3;
     }
 
-    if(!readRootDirectory(disk)){
-        fprintf(stderr, "Error: Unable to read root directory\n");
-        free(g_Fat);
+    if (!ReadRootDirectory(disk)) {
+        fprintf(stderr, "Could not read root directory!\n");
+        free(g_fat);
         fclose(disk);
         return -4;
     }
 
-    DirectoryEntry* entry = findFile(argv[2]);
-    if(!entry){
-        fprintf(stderr, "Error: File not found\n");
-        free(g_Fat);
-        free(g_RootDirectory);
+    DirectoryEntry* file_entry = FindFile(argv[2]);
+    if (!file_entry) {
+        fprintf(stderr, "Could not find file %s!\n", argv[2]);
+        free(g_fat);
+        free(g_root_directory);
         fclose(disk);
         return -5;
     }
 
-    free(g_Fat);
+    uint8_t* buffer = (uint8_t*) malloc(file_entry->size + g_boot_sector.bytes_per_sector);
+    if (!buffer) {
+        fprintf(stderr, "Failed to allocate memory for file buffer\n");
+        free(g_fat);
+        free(g_root_directory);
+        fclose(disk);
+        return -6;
+    }
+
+    if (!ReadFile(file_entry, disk, buffer)) {
+        fprintf(stderr, "Could not read file %s!\n", argv[2]);
+        free(g_fat);
+        free(g_root_directory);
+        free(buffer);
+        fclose(disk);
+        return -7;
+    }
+
+    for (size_t i = 0; i < file_entry->size; i++)
+    {
+        if (isprint(buffer[i])) fputc(buffer[i], stdout);
+        else printf("<%02x>", buffer[i]);
+    }
+    printf("\n");
+
+    free(buffer);
+    free(g_fat);
+    free(g_root_directory);
+    fclose(disk);
     return 0;
 }
