@@ -44,7 +44,7 @@ start:
     ;some bios start at 0x7C00, so we need to copy it to 0x7E00
     push es
     push word .after
-    rettf
+    retf
 
 .after:
 
@@ -192,7 +192,7 @@ start:
 puts:
     push si
     push ax
-    push
+    push bx
 ;handling floppy errors
 
 floppy_error:
